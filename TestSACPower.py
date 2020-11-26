@@ -75,12 +75,14 @@ class NormalizedActions(AgentWithConverter):
 
         encoded_act = self.select_action(transformed_observation)
         #print(encoded_act)
-        return self.convert_act(encoded_act)
+        #return self.convert_act(encoded_act)
+        return encoded_act
 
 
     def select_action(self, transformed_obs, test=False):
 
         action = policy_net.get_action(obs)
+        print("action {} ".format(action))
         return action
 
 
@@ -182,7 +184,9 @@ class PolicyNetwork(nn.Module):
 
         action = action.detach().cpu().numpy()
 
-        return action[0]
+        #print("action[0] {} ,".format(action[0,0]))
+
+        return action[0,0]
 
 
 def soft_q_update(batch_size,
