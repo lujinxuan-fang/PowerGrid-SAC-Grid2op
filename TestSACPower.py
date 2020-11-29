@@ -49,16 +49,14 @@ class NormalizedActions(AgentWithConverter):
         self.env = env
         self.obs_space = observation_space
         self.action_space = action_space
+        self.obs_size = observation_space.size()
+        self.action_size = action_space.size()
 
 
     def convert_obs(self, observation):
 
         obs_vec = observation.to_vect()
         return obs_vec
-
-    def convert_act(self, encoded_act):
-
-        return super().convert_act(encoded_act)
 
     def my_act(self, transformed_obs, reward=None, done=False):
 
@@ -160,7 +158,9 @@ class PolicyNetwork(nn.Module):
 
     def get_action(self, obs):
 
-        print(obs)
+        print("get action ",obs)
+        obs = torch.FloatTensor(obs).to(device)
+        
         mean, log_std = self.forward(obs)
         std = log_std.exp()
 
@@ -235,8 +235,8 @@ print('starting  {} '.format(env_name))
 my_agent = NormalizedActions(env, env.observation_space, env.action_space)
 print(my_agent)
 
-action_dim = my_agent.action_space.shape[0]
-state_dim = my_agent.obs_space.shape[0]
+action_dim = my_agent.action_space.size()
+state_dim = my_agent.obs_space.size()
 print('obs space:{}; action space: {}'.format(state_dim, action_dim))
 hidden_dim = 256
 
@@ -272,6 +272,7 @@ batch_size  = 128
 while frame_idx < max_frames:
     #state = env.reset()
     obs = my_agent.convert_obs(my_agent.env.reset())
+    obs = torch.from_numpy(obs)
     #print(obs)
     episode_reward = 0
 
@@ -280,7 +281,8 @@ while frame_idx < max_frames:
         #action = policy_net.get_action(obs)
         action = policy_net.get_action(obs)
         #print(action)
-        next_state, reward, done, info = my_agent.env.step(action)
+       next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(action))
+       next_state = my_agent.convert_obs(next_state)
 
         replay_buffer.push(obs, action, reward, next_state, done)
         if len(replay_buffer) > batch_size:
