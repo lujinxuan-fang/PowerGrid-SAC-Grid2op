@@ -52,22 +52,16 @@ class NormalizedActions(AgentWithConverter):
 
 
     def convert_obs(self, observation):
-        """
-        将observation转换成numpy vector的形式，便于处理
-        """
+
         obs_vec = observation.to_vect()
         return obs_vec
 
     def convert_act(self, encoded_act):
-        """
-        将my_act返回的动作编号转换回env能处理的字典形式
-        """
+
         return super().convert_act(encoded_act)
 
     def my_act(self, transformed_obs, reward=None, done=False):
-        """
-        根据obs返回encoded action
-        """
+
         action = self.select_action(transformed_obs)
 
         return action
