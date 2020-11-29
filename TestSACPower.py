@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 
 from grid2op.Agent import BaseAgent, AgentWithConverter
 from grid2op.Reward import GameplayReward, L2RPNReward, FlatReward
-from grid2op.Converter import ToVect
+from grid2op.Converter import IdToAct
 import grid2op
 
 use_cuda = torch.cuda.is_available()
@@ -45,15 +45,11 @@ class ReplayBuffer:
 
 class NormalizedActions(AgentWithConverter):
     def __init__(self, env, observation_space, action_space, args=None):
-        super(NormalizedActions, self).__init__(action_space, action_space_converter=ToVect)
-        self.__bias = 0.0
+        super(NormalizedActions, self).__init__(action_space, action_space_converter=IdToAct)
         self.env = env
         self.obs_space = observation_space
+        self.action_space = action_space
 
-        self.obs_size = observation_space.size()
-        self.action_size = action_space.size()
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        #print('obs space:{}; action space: {}'.format(self.obs_size, self.action_size))
 
     def convert_obs(self, observation):
         """
@@ -66,23 +62,18 @@ class NormalizedActions(AgentWithConverter):
         """
         将my_act返回的动作编号转换回env能处理的字典形式
         """
+        return super().convert_act(encoded_act)
 
-        res = self.__init__(ToVect.from_vect(encoded_act, check_legit=False))
-        return res
+    def my_act(self, transformed_obs, reward=None, done=False):
+        """
+        根据obs返回encoded action
+        """
+        action = self.select_action(transformed_obs)
 
-    def my_act(self, transformed_observation, reward, done=False):
+        return action
 
-
-        encoded_act = self.select_action(transformed_observation)
-        #print(encoded_act)
-        #return self.convert_act(encoded_act)
-        return encoded_act
-
-
-    def select_action(self, transformed_obs, test=False):
-
+    def select_action(self, obs, test=False):
         action = policy_net.get_action(obs)
-        print("action {} ".format(action))
         return action
 
 
@@ -174,7 +165,8 @@ class PolicyNetwork(nn.Module):
         return action, log_prob, z, mean, log_std
 
     def get_action(self, obs):
-        obs = torch.FloatTensor(obs).unsqueeze(0).to(device)
+
+        print(obs)
         mean, log_std = self.forward(obs)
         std = log_std.exp()
 
@@ -184,9 +176,7 @@ class PolicyNetwork(nn.Module):
 
         action = action.detach().cpu().numpy()
 
-        #print("action[0] {} ,".format(action[0,0]))
-
-        return action[0,0]
+        return action
 
 
 def soft_q_update(batch_size,
@@ -242,20 +232,17 @@ def soft_q_update(batch_size,
             target_param.data * (1.0 - soft_tau) + param.data * soft_tau
         )
 
-# 指定服务器GPU编号
 
 # create an environment
 env_name = "l2rpn_neurips_2020_track1_small"  # for example, other environments might be usable
-env = grid2op.make(env_name, reward_class=L2RPNReward, other_rewards={"other_reward" : FlatReward})
-# chunk_size = 1024
-# env.chronics_handler.set_chunk_size(chunk_size)
-print('环境 {} 初始化成功'.format(env_name))
+env = grid2op.make(env_name)
+print('starting  {} '.format(env_name))
 
 my_agent = NormalizedActions(env, env.observation_space, env.action_space)
+print(my_agent)
 
-
-action_dim = my_agent.action_size
-state_dim = my_agent.obs_size
+action_dim = my_agent.action_space.shape[0]
+state_dim = my_agent.obs_space.shape[0]
 print('obs space:{}; action space: {}'.format(state_dim, action_dim))
 hidden_dim = 256
 
@@ -288,7 +275,6 @@ frame_idx   = 0
 rewards     = []
 batch_size  = 128
 
-
 while frame_idx < max_frames:
     #state = env.reset()
     obs = my_agent.convert_obs(my_agent.env.reset())
@@ -298,11 +284,9 @@ while frame_idx < max_frames:
     for step in range(max_steps):
 
         #action = policy_net.get_action(obs)
-        action = my_agent.my_act(obs, reward=None)
+        action = policy_net.get_action(obs)
         #print(action)
-        next_state, reward, done, info = env.step(action)
-
-
+        next_state, reward, done, info = my_agent.env.step(action)
 
         replay_buffer.push(obs, action, reward, next_state, done)
         if len(replay_buffer) > batch_size:
