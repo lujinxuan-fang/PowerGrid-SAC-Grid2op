@@ -170,7 +170,7 @@ class PolicyNetwork(nn.Module):
 
         action = action.detach().cpu().numpy()
 
-        return action
+        return action[0]
 
 
 def soft_q_update(batch_size,
@@ -281,7 +281,7 @@ while frame_idx < max_frames:
         #action = policy_net.get_action(obs)
         action = policy_net.get_action(obs)
         #print(action)
-       next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action[0])))
+       next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action)))
        next_state = my_agent.convert_obs(next_state)
 
         replay_buffer.push(obs, action, reward, next_state, done)
