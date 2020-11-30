@@ -159,7 +159,8 @@ class PolicyNetwork(nn.Module):
     def get_action(self, obs):
 
         #print("get action ",obs)
-        obs = torch.FloatTensor(obs).to(device)
+        #obs = torch.FloatTensor(obs).to(device)
+        obs = torch.FloatTensor(obs).unsqueeze(0).to(device)
         
         mean, log_std = self.forward(obs)
         std = log_std.exp()
@@ -233,12 +234,14 @@ env = grid2op.make(env_name)
 print('starting  {} '.format(env_name))
 
 my_agent = NormalizedActions(env, env.observation_space, env.action_space)
-print(my_agent)
+#print(my_agent)
 
-action_dim = my_agent.action_space.size()
+#action_dim = my_agent.action_space.size()
+action_dim = 1
 state_dim = my_agent.obs_space.size()
 print('obs space:{}; action space: {}'.format(state_dim, action_dim))
 hidden_dim = 256
+action_range = [-1, 1]
 
 value_net = ValueNetwork(state_dim, hidden_dim).to(device)
 target_value_net = ValueNetwork(state_dim, hidden_dim).to(device)
@@ -281,7 +284,9 @@ while frame_idx < max_frames:
         #action = policy_net.get_action(obs)
         action = policy_net.get_action(obs)
         #print(action)
-       next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action)))
+       action_in = action * (action_range[1] - action_range[0]) / 2.0 + (action_range[1] + action_range[0]) / 2.0
+       next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action_in)))
+       #next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action)))
        next_state = my_agent.convert_obs(next_state)
 
         replay_buffer.push(obs, action, reward, next_state, done)
