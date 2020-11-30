@@ -19,7 +19,7 @@ from grid2op.Converter import IdToAct
 import grid2op
 
 use_cuda = torch.cuda.is_available()
-device   = torch.device("cuda" if use_cuda else "cpu")
+device = torch.device("cuda" if use_cuda else "cpu")
 
 
 class ReplayBuffer:
@@ -45,16 +45,14 @@ class ReplayBuffer:
 
 class NormalizedActions(AgentWithConverter):
     def __init__(self, env, observation_space, action_space, args=None):
-        super(NormalizedActions, self).__init__(action_space, action_space_converter=IdToAct)
+        super(NormalizedActions, self)
         self.env = env
         self.obs_space = observation_space
-        #self.action_space = action_space
+        # self.action_space = action_space
         self.obs_size = observation_space.size()
         self.action_size = action_space.size()
 
-
     def convert_obs(self, observation):
-
         obs_vec = observation.to_vect()
         return obs_vec
 
@@ -65,13 +63,15 @@ class NormalizedActions(AgentWithConverter):
         return action
 
     def select_action(self, obs, test=False):
+
         action = policy_net.get_action(obs)
+
         return action
 
 
 def plot(frame_idx, rewards):
     clear_output(True)
-    plt.figure(figsize=(20,5))
+    plt.figure(figsize=(20, 5))
     plt.subplot(131)
     plt.title('frame %s. reward: %s' % (frame_idx, rewards[-1]))
     plt.plot(rewards)
@@ -148,28 +148,30 @@ class PolicyNetwork(nn.Module):
         std = log_std.exp()
 
         normal = Normal(mean, std)
-        z = normal.sample()
+        z = normal.sample() # reparameterization trick (mean + std * N(0,1))
         action = torch.tanh(z)
 
+        # Enforcing Action Bounds
         log_prob = normal.log_prob(z) - torch.log(1 - action.pow(2) + epsilon)
         log_prob = log_prob.sum(-1, keepdim=True)
 
         return action, log_prob, z, mean, log_std
 
     def get_action(self, obs):
-
-        #print("get action ",obs)
-        #obs = torch.FloatTensor(obs).to(device)
+        # print("get action ",obs)
+        # obs = torch.FloatTensor(obs).to(device)
         obs = torch.FloatTensor(obs).unsqueeze(0).to(device)
-        
+
         mean, log_std = self.forward(obs)
         std = log_std.exp()
 
         normal = Normal(mean, std)
-        z = normal.sample()
+        z = normal.sample() # reparameterization trick (mean + std * N(0,1))
         action = torch.tanh(z)
 
+        action_sorted = sorted(action)
         action = action.detach().cpu().numpy()
+        print("action ",action)
 
         return action[0]
 
@@ -195,11 +197,11 @@ def soft_q_update(batch_size,
 
     target_value = target_value_net(next_state)
     next_q_value = reward + (1 - done) * gamma * target_value
-    q_value_loss = soft_q_criterion(expected_q_value, next_q_value.detach())
+    q_value_loss = soft_q_criterion(expected_q_value, next_q_value.detach())   # J_Q
 
     expected_new_q_value = soft_q_net(obs, new_action)
     next_value = expected_new_q_value - log_prob
-    value_loss = value_criterion(expected_value, next_value.detach())
+    value_loss = value_criterion(expected_value, next_value.detach())   # J_V
 
     log_prob_target = expected_new_q_value - expected_value
     policy_loss = (log_prob * (log_prob - log_prob_target).detach()).mean()
@@ -234,9 +236,8 @@ env = grid2op.make(env_name)
 print('starting  {} '.format(env_name))
 
 my_agent = NormalizedActions(env, env.observation_space, env.action_space)
-#print(my_agent)
 
-#action_dim = my_agent.action_space.size()
+# action_dim = my_agent.action_space.size()
 action_dim = 1
 state_dim = my_agent.obs_space.size()
 print('obs space:{}; action space: {}'.format(state_dim, action_dim))
@@ -266,41 +267,42 @@ policy_optimizer = optim.Adam(policy_net.parameters(), lr=policy_lr)
 replay_buffer_size = 1000000
 replay_buffer = ReplayBuffer(replay_buffer_size)
 
-max_frames  = 40000
-max_steps   = 500
-frame_idx   = 0
-rewards     = []
-batch_size  = 128
+max_frames = 40000
+max_steps = 5000
+frame_idx = 0
+rewards = []
+batch_size = 128
 
 while frame_idx < max_frames:
-    #state = env.reset()
+    # state = env.reset()
     obs = my_agent.convert_obs(my_agent.env.reset())
     obs = torch.from_numpy(obs)
-    #print(obs)
+    # print(obs)
     episode_reward = 0
 
     for step in range(max_steps):
-
-        #action = policy_net.get_action(obs)
+        # action = policy_net.get_action(obs)
         action = policy_net.get_action(obs)
-        #print(action)
-       action_in = action * (action_range[1] - action_range[0]) + (action_range[1] + action_range[0]) 
-       next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action_in)))
-       #next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action)))
-       next_state = my_agent.convert_obs(next_state)
+        # print(action)
+    action_in = action * (action_range[1] - action_range[0]) / (action_range[1] + action_range[0])
+    next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action_in)))
+    # next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action)))
+    next_state = my_agent.convert_obs(next_state)
 
-        replay_buffer.push(obs, action, reward, next_state, done)
-        if len(replay_buffer) > batch_size:
-            soft_q_update(batch_size)
+    replay_buffer.push(obs, action, reward, next_state, done)
+    if len(replay_buffer) > batch_size:
+        soft_q_update(batch_size)
 
-        obs = next_state
-        episode_reward += reward
-        frame_idx += 1
+    obs = next_state
+    episode_reward += reward
+    frame_idx += 1
 
-        if frame_idx % 1000 == 0:
-            plot(frame_idx, rewards)
+    if frame_idx % 1000 == 0:
+        plot(frame_idx, rewards)
 
-        if done:
-            break
+    if done:
+        break
 
-    rewards.append(episode_reward)
+    print("Ep_i {}, the ep_r is {}, the time is {}".format(frame_idx, episode_reward, step))
+
+rewards.append(episode_reward)
