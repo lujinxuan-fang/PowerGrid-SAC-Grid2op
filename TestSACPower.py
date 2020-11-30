@@ -48,7 +48,7 @@ class NormalizedActions(AgentWithConverter):
         super(NormalizedActions, self).__init__(action_space, action_space_converter=IdToAct)
         self.env = env
         self.obs_space = observation_space
-        self.action_space = action_space
+        #self.action_space = action_space
         self.obs_size = observation_space.size()
         self.action_size = action_space.size()
 
@@ -158,7 +158,7 @@ class PolicyNetwork(nn.Module):
 
     def get_action(self, obs):
 
-        print("get action ",obs)
+        #print("get action ",obs)
         obs = torch.FloatTensor(obs).to(device)
         
         mean, log_std = self.forward(obs)
