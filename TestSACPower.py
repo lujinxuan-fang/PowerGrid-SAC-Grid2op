@@ -45,7 +45,7 @@ class ReplayBuffer:
 
 class NormalizedActions(AgentWithConverter):
     def __init__(self, env, observation_space, action_space, args=None):
-        super(NormalizedActions, self)
+        super(NormalizedActions, self).__init__(action_space,action_space_converter=IdToAct)
         self.env = env
         self.obs_space = observation_space
         # self.action_space = action_space
@@ -62,9 +62,9 @@ class NormalizedActions(AgentWithConverter):
 
         return action
 
-    def select_action(self, obs, test=False):
+    def select_action(self, obs, action_min, action_max):
 
-        action = policy_net.get_action(obs)
+        action = policy_net.get_action(obs, action_min, action_max)
 
         return action
 
@@ -157,7 +157,7 @@ class PolicyNetwork(nn.Module):
 
         return action, log_prob, z, mean, log_std
 
-    def get_action(self, obs):
+    def get_action(self, obs, action_min, action_max):
         # print("get action ",obs)
         # obs = torch.FloatTensor(obs).to(device)
         obs = torch.FloatTensor(obs).unsqueeze(0).to(device)
@@ -169,11 +169,17 @@ class PolicyNetwork(nn.Module):
         z = normal.sample() # reparameterization trick (mean + std * N(0,1))
         action = torch.tanh(z)
 
-        action_sorted = sorted(action)
-        action = action.detach().cpu().numpy()
-        print("action ",action)
+        #print("action", action.item())
+        temp = action.item()
+        if temp > action_max :
+            action_max = temp
+        elif temp < action_min :
+            action_min = temp
 
-        return action[0]
+        action = action.detach().cpu().numpy()
+        #print("action ",action)
+
+        return action, action_min, action_max
 
 
 def soft_q_update(batch_size,
@@ -234,15 +240,16 @@ def soft_q_update(batch_size,
 env_name = "l2rpn_neurips_2020_track1_small"  # for example, other environments might be usable
 env = grid2op.make(env_name)
 print('starting  {} '.format(env_name))
-
+action_min = 1
+action_max = 0
 my_agent = NormalizedActions(env, env.observation_space, env.action_space)
-
+print("action space", my_agent.action_size)
 # action_dim = my_agent.action_space.size()
 action_dim = 1
 state_dim = my_agent.obs_space.size()
 print('obs space:{}; action space: {}'.format(state_dim, action_dim))
 hidden_dim = 256
-action_range = [0, 1]
+
 
 value_net = ValueNetwork(state_dim, hidden_dim).to(device)
 target_value_net = ValueNetwork(state_dim, hidden_dim).to(device)
@@ -282,9 +289,13 @@ while frame_idx < max_frames:
 
     for step in range(max_steps):
         # action = policy_net.get_action(obs)
-        action = policy_net.get_action(obs)
-        # print(action)
-    action_in = action * (action_range[1] - action_range[0]) / (action_range[1] + action_range[0])
+        action, action_min, action_max  = policy_net.get_action(obs, action_min, action_max)
+        #print(action)
+    #print("min  {} , max {} ".format(action_min, action_max))
+
+    action_in = (action.item() - action_min) / (action_max - action_min)
+    action_in = action * action_in
+    #print("action_in {} ".format(action_in))
     next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action_in)))
     # next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action)))
     next_state = my_agent.convert_obs(next_state)
