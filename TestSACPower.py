@@ -291,29 +291,29 @@ while frame_idx < max_frames:
         # action = policy_net.get_action(obs)
         action, action_min, action_max  = policy_net.get_action(obs, action_min, action_max)
         #print(action)
-    #print("min  {} , max {} ".format(action_min, action_max))
+        #print("min  {} , max {} ".format(action_min, action_max))
 
-    action_in = (action.item() - action_min) / (action_max - action_min)
-    action_in = action * action_in
-    #print("action_in {} ".format(action_in))
-    next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action_in)))
-    # next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action)))
-    next_state = my_agent.convert_obs(next_state)
+        action_in = (action.item() - action_min) / (action_max - action_min)
+        action_in = action * action_in
+        #print("action_in {} ".format(action_in))
+        next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action_in)))
+        # next_state, reward, done, info = my_agent.env.step(my_agent.convert_act(int(action)))
+        next_state = my_agent.convert_obs(next_state)
 
-    replay_buffer.push(obs, action, reward, next_state, done)
-    if len(replay_buffer) > batch_size:
-        soft_q_update(batch_size)
+        replay_buffer.push(obs, action, reward, next_state, done)
+        if len(replay_buffer) > batch_size:
+            soft_q_update(batch_size)
 
-    obs = next_state
-    episode_reward += reward
-    frame_idx += 1
+        obs = next_state
+        episode_reward += reward
+        frame_idx += 1
 
-    if frame_idx % 1000 == 0:
-        plot(frame_idx, rewards)
+        if frame_idx % 1000 == 0:
+            plot(frame_idx, rewards)
 
-    if done:
-        break
+        if done:
+            break
 
-    print("Ep_i {}, the ep_r is {}, the time is {}".format(frame_idx, episode_reward, step))
+        print("Ep_i {}, the ep_r is {}, the time is {}".format(frame_idx, episode_reward, step))
 
-rewards.append(episode_reward)
+    rewards.append(episode_reward)
