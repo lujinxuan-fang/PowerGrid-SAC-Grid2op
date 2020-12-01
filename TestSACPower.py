@@ -166,7 +166,7 @@ class PolicyNetwork(nn.Module):
         std = log_std.exp()
 
         normal = Normal(mean, std)
-        z = normal.sample() # reparameterization trick (mean + std * N(0,1))
+        z = normal.sample() 
         action = torch.tanh(z)
 
         #print("action", action.item())
