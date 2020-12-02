@@ -336,8 +336,8 @@ def main():
             if args.render: env.render()
             agent.store_transition(state, action, reward, next_state, done)
 
-            if agent.num_transition >= args.capacity:
-                agent.update()
+            if agent.SAC.num_transition >= args.capacity:
+                agent.SAC.update()
 
             state = next_state
             if done or t == 199:
@@ -345,8 +345,8 @@ def main():
                     print("Ep_i {}, the ep_r is {}, the t is {}".format(i, ep_r, t))
                 break
         if i % args.log_interval == 0:
-            agent.save()
-        agent.writer.add_scalar('ep_r', ep_r, global_step=i)
+            agent.SAC.save()
+        agent.SAC.writer.add_scalar('ep_r', ep_r, global_step=i)
         ep_r = 0
 
 
