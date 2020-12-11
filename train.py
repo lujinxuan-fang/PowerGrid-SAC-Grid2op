@@ -15,6 +15,7 @@ def run(args):
         config = yaml.load(f, Loader=yaml.SafeLoader)
 
     # Create environments.
+
     env = grid2op.make("l2rpn_neurips_2020_track1_small", reward_class=L2RPNReward)
     test_env = grid2op.make("l2rpn_neurips_2020_track1_small", reward_class=L2RPNReward)
 
@@ -30,6 +31,8 @@ def run(args):
 
 
 if __name__ == '__main__':
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = "7"
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--config', type=str, default=os.path.join('configs', 'sacd.yaml'))
