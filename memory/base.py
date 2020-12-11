@@ -91,10 +91,11 @@ class LazyMemory(dict):
     def _sample(self, indices, batch_size):
         bias = -self._p if self._n == self.capacity else 0
 
+        #print('in _samples, size={}'.format((batch_size, *self.state_shape)))
         states = np.empty(
-            (batch_size, *self.state_shape), dtype=np.uint64)
+            (batch_size, *self.state_shape), dtype=np.uint8)
         next_states = np.empty(
-            (batch_size, *self.state_shape), dtype=np.uint64)
+            (batch_size, *self.state_shape), dtype=np.uint8)
 
         for i, index in enumerate(indices):
             _index = np.mod(index+bias, self.capacity)
