@@ -9,7 +9,7 @@ from utils import disable_gradients
 
 from torch.utils.tensorboard import SummaryWriter
 
-from memory import LazyMultiStepMemory
+from memory import LazyMultiStepMemory, LazyPrioritizedMultiStepMemory
 from utils import update_params, RunningMeanStats
 from Normalenv import Normalagent
 
@@ -19,14 +19,17 @@ from grid2op.Reward import GameplayReward, L2RPNReward
 
 
 class SacdAgent():
-    def __init__(self, env, test_env, log_dir, num_steps=10000, batch_size=128,
+    def __init__(self, env, test_env, log_dir, num_steps=300000, batch_size=64,
                  lr=0.0003, memory_size=1000000, gamma=0.99, multi_step=1,
-                 target_entropy_ratio=0.98, start_steps=2000,
-                 update_interval=4, target_update_interval=8000,num_eval_steps=100000,
-                 max_episode_steps=10000, log_interval=10, eval_interval=1000,
+                 target_entropy_ratio=0.98, start_steps=20000,
+                 update_interval=4, target_update_interval=8000,use_per = False, num_eval_steps=125000,
+                 max_episode_steps=27000, log_interval=10, eval_interval=1000,
                  cuda=True, seed=0):
         super().__init__()
 
+        self.device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
+
+    
         print("starting..")
         self.env = env
         self.test_env = test_env
@@ -44,11 +47,15 @@ class SacdAgent():
         # torch.backends.cudnn.deterministic = True  # It harms a performance.
         # torch.backends.cudnn.benchmark = False  # It harms a performance.
 
-        self.device = torch.device(
-            "cuda" if cuda and torch.cuda.is_available() else "cpu")
 
+        # LazyMemory efficiently stores FrameStacked states.
+        if use_per:
+            beta_steps = (num_steps - start_steps) / update_interval
+            self.memory = LazyPrioritizedMultiStepMemory(capacity=memory_size,state_shape=[self.env.observation_space.n],
+                                                         device=self.device, gamma=gamma, multi_step=multi_step, beta_steps=beta_steps)
+        else:
         # Base Memory
-        self.memory = LazyMultiStepMemory(capacity=memory_size, state_shape=self.env.observation_space.shape,
+            self.memory = LazyMultiStepMemory(capacity=memory_size, state_shape=[self.env.observation_space.n],
                                           device=self.device, gamma=gamma, multi_step=multi_step)
 
         self.log_dir = log_dir
@@ -58,6 +65,7 @@ class SacdAgent():
             os.makedirs(self.model_dir)
         if not os.path.exists(self.summary_dir):
             os.makedirs(self.summary_dir)
+
 
         self.writer = SummaryWriter(log_dir=self.summary_dir)
         self.train_return = RunningMeanStats(log_interval)
@@ -72,24 +80,22 @@ class SacdAgent():
         self.start_steps = start_steps
         self.update_interval = update_interval
         self.target_update_interval = target_update_interval
-        #self.use_per = use_per
+        self.use_per = use_per
         self.num_eval_steps = num_eval_steps
         self.max_episode_steps = max_episode_steps
         self.log_interval = log_interval
         self.eval_interval = eval_interval
 
         # Define networks.
-        self.policy = CateoricalPolicy(
-            self.agent.obs_size, self.agent.action_size).to(self.device)
+        self.policy = CateoricalPolicy(self.agent.obs_size, self.agent.action_size).to(self.device)
         #print("policy ")
 
-        self.online_critic = TwinnedQNetwork(
-            self.agent.obs_size, self.agent.action_size).to(device=self.device)
+        self.online_critic = TwinnedQNetwork(self.agent.obs_size, self.agent.action_size).to(device=self.device)
         #print("critic ")
 
-        self.target_critic = TwinnedQNetwork(
-            self.agent.obs_size, self.agent.action_size).to(device=self.device).eval()
+        self.target_critic = TwinnedQNetwork(self.agent.obs_size, self.agent.action_size).to(device=self.device).eval()
         #print("target ")
+
 
         # Copy parameters of the learning network to the target network.
         self.target_critic.load_state_dict(self.online_critic.state_dict())
@@ -121,23 +127,18 @@ class SacdAgent():
         return self.steps % self.update_interval == 0 \
                and self.steps >= self.start_steps
 
-
     def explore(self, state):
         # Act with randomness.
-        state = torch.ByteTensor(
-            state[None, ...]).to(self.device).float() / 255.
+        state = torch.ByteTensor(state[None, ...]).to(self.device).float() / 255.
         with torch.no_grad():
             action, _, _ = self.policy.sample(state)
-        #print("act with random -model sample", action.item())
         return action.item()
 
     def exploit(self, state):
         # Act without randomness.
-        state = torch.ByteTensor(
-            state[None, ...]).to(self.device).float() / 255.
+        state = torch.ByteTensor(state[None, ...]).to(self.device).float() / 255.
         with torch.no_grad():
             action = self.policy.act(state)
-            #print("act without random -model act", action.item())
         return action.item()
 
     def update_target(self):
@@ -207,43 +208,32 @@ class SacdAgent():
 
         # Intuitively, we increse alpha when entropy is less than target
         # entropy, vice versa.
-        entropy_loss = -torch.mean(
-            self.log_alpha * (self.target_entropy - entropies)
-            * weights)
+        entropy_loss = -torch.mean(self.log_alpha * (self.target_entropy - entropies) * weights)
+
         return entropy_loss
-
-    def save_models(self, save_dir):
-        super().save_models(save_dir)
-        self.policy.save(os.path.join(save_dir, 'policy.pth'))
-        self.online_critic.save(os.path.join(save_dir, 'online_critic.pth'))
-        self.target_critic.save(os.path.join(save_dir, 'target_critic.pth'))
-
+    
     def train_episode(self):
         self.episodes += 1
         episode_return = 0.
         episode_steps = 0
 
         done = False
-        #state = self.env.reset()
+
         state = self.agent.convert_obs(self.env.reset())
+
 
         while (not done) and episode_steps <= self.max_episode_steps:
 
             if self.start_steps > self.steps:
-                #action = self.agent.my_act(state)
-                action = self.exploit(state)
+                action = self.agent.action_space.sample()
 
             else:
                 action = self.explore(state)
 
-            #print("action {} ".format(action))
+
             next_state, reward, done, _ = self.env.step(self.agent.convert_act(action))
 
-
             next_state = self.agent.convert_obs(next_state)
-            #reward = torch.tensor([reward], device=self.device, dtype=torch.float)
-            #done = torch.tensor([done], device=self.device, dtype=torch.float)
-
 
             # Clip reward to [-1.0, 1.0].
             clipped_reward = max(min(reward, 1.0), -1.0)
@@ -257,15 +247,12 @@ class SacdAgent():
             state = next_state
 
             if self.is_update():
-                #print("go to learn()")
                 self.learn()
 
             if self.steps % self.target_update_interval == 0:
-                #print("steps % target_update_interval == 0  --> set 8000")
                 self.update_target()
 
             if self.steps % self.eval_interval == 0:
-                #print("steps % eval_interval == 0  --> set 1000")
                 self.evaluate()
                 self.save_models(os.path.join(self.model_dir, 'final'))
 
@@ -278,7 +265,7 @@ class SacdAgent():
 
         print(f'Episode: {self.episodes}  '
               f'Episode steps: {episode_steps}  '
-              f'Return: {episode_return}')
+              f'Return: {episode_return:<5.3f}')
 
     def learn(self):
         assert hasattr(self, 'q1_optim') and hasattr(self, 'q2_optim') and\
@@ -288,9 +275,12 @@ class SacdAgent():
         #print("learn..")
 
 
-        batch = self.memory.sample(self.batch_size)
-        # Set priority weights to 1 when we don't use PER.
-        weights = 1.
+        if self.use_per:
+            batch, weights = self.memory.sample(self.batch_size)
+        else:
+            batch = self.memory.sample(self.batch_size)
+            # Set priority weights to 1 when we don't use PER.
+            weights = 1.
 
         q1_loss, q2_loss, errors, mean_q1, mean_q2 = self.calc_critic_loss(batch, weights)
         policy_loss, entropies = self.calc_policy_loss(batch, weights)
@@ -302,6 +292,9 @@ class SacdAgent():
         update_params(self.alpha_optim, entropy_loss)
 
         self.alpha = self.log_alpha.exp()
+
+        if self.use_per:
+            self.memory.update_priority(errors)
 
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
@@ -334,6 +327,7 @@ class SacdAgent():
         num_episodes = 0
         num_steps = 0
         total_return = 0.0
+        total_episode = 0
 
         while True:
 
@@ -359,11 +353,13 @@ class SacdAgent():
 
             num_episodes += 1
             total_return += episode_return
+            total_episode += episode_steps
 
             if num_steps > self.num_eval_steps:
                 break
 
         mean_return = total_return / num_episodes
+        step_return = total_episode / num_steps  #
 
         if mean_return > self.best_eval_score:
             self.best_eval_score = mean_return
@@ -373,13 +369,17 @@ class SacdAgent():
             'reward/test', mean_return, self.steps)
         print('-' * 60)
         print(f'Num steps: {self.steps}  '
+              f'return step: {step_return}  '  #
               f'return: {mean_return:<5.3f}')
         print('-' * 60)
-
 
     def save_models(self, save_dir):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
+
+        self.policy.save(os.path.join(save_dir, 'policy.pth'))
+        self.online_critic.save(os.path.join(save_dir, 'online_critic.pth'))
+        self.target_critic.save(os.path.join(save_dir, 'target_critic.pth'))
 
     def __del__(self):
         self.env.close()
