@@ -16,8 +16,8 @@ def run(args):
 
     # Create environments.
 
-    env = grid2op.make("l2rpn_neurips_2020_track1_small", reward_class=L2RPNReward)
-    test_env = grid2op.make("l2rpn_neurips_2020_track1_small", reward_class=L2RPNReward)
+    env = grid2op.make("l2rpn_neurips_2020_track1_small", reward_class=L2RPNReward, other_rewards = {"gameplay": GameplayReward})
+    test_env = grid2op.make("l2rpn_neurips_2020_track1_small", reward_class=L2RPNReward, other_rewards = {"gameplay": GameplayReward})
 
 
     # Specify the directory to log.
@@ -32,11 +32,11 @@ def run(args):
 
 if __name__ == '__main__':
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--config', type=str, default=os.path.join('configs', 'sacd.yaml'))
-    parser.add_argument('--cuda', action='store_true')
+    parser.add_argument('--cuda', action='store_true', default=True)
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
     run(args)
