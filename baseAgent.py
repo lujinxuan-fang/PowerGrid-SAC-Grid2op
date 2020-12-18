@@ -19,25 +19,19 @@ from grid2op.Reward import GameplayReward, L2RPNReward
 
 
 class SacdAgent():
-    def __init__(self, env, test_env, log_dir, num_steps=300000, batch_size=64,
+    def __init__(self, env, test_env, log_dir, num_steps=1000000, batch_size=64,
                  lr=0.0003, memory_size=1000000, gamma=0.99, multi_step=1,
-                 target_entropy_ratio=0.98, start_steps=20000,
-                 update_interval=4, target_update_interval=8000,use_per = False, num_eval_steps=125000,
-                 max_episode_steps=27000, log_interval=10, eval_interval=1000,
+                 target_entropy_ratio=0.98, start_steps=1000,
+                 update_interval=50, target_update_interval=8000,use_per=False,num_eval_steps=125000,
+                 max_episode_steps=20000, log_interval=10, eval_interval=10000,
                  cuda=True, seed=0):
         super().__init__()
 
-        self.device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
-
-    
         print("starting..")
         self.env = env
         self.test_env = test_env
         #print(env.observation_space.size())
         #print(env.action_space.size())
-
-        self.agent = Normalagent(env, env.observation_space, env.action_space)
-        #print("obs {} , action {} ".format(self.agent.obs_size, self.agent.action_size))
 
         # Set seed.
         torch.manual_seed(seed)
@@ -47,6 +41,11 @@ class SacdAgent():
         # torch.backends.cudnn.deterministic = True  # It harms a performance.
         # torch.backends.cudnn.benchmark = False  # It harms a performance.
 
+        self.device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
+        #print(self.device)
+
+        self.agent = Normalagent(env, env.observation_space, env.action_space)
+        #print("obs {} , action {} ".format(self.agent.obs_size, self.agent.action_size))
 
         # LazyMemory efficiently stores FrameStacked states.
         if use_per:
@@ -85,6 +84,10 @@ class SacdAgent():
         self.max_episode_steps = max_episode_steps
         self.log_interval = log_interval
         self.eval_interval = eval_interval
+
+        self.do_nothing = self.agent.action_space({})
+        self.print_next = False
+        self.threshold_powerFlow_safe = 0.9
 
         # Define networks.
         self.policy = CateoricalPolicy(self.agent.obs_size, self.agent.action_size).to(self.device)
@@ -218,33 +221,49 @@ class SacdAgent():
         episode_steps = 0
 
         done = False
-
+        countdo = 0
+        obs = self.env.reset()
+        #print("obs",obs)
         state = self.agent.convert_obs(self.env.reset())
 
 
         while (not done) and episode_steps <= self.max_episode_steps:
 
-            if self.start_steps > self.steps:
-                action = self.agent.action_space.sample()
+            if np.all(obs.rho <= self.threshold_powerFlow_safe):  # in program this is set 0.9
+                action = 0
+                #next_state, reward, done, _ = self.env.step(self.agent.convert_act(action))
+                #next_state, reward, done, _ = self.env.step(self.do_nothing)
+                countdo += 1
 
             else:
-                action = self.explore(state)
+                if self.start_steps > self.steps:
+                    action = self.agent.action_space.sample()
+                else:
+                    action = self.explore(state)
 
-
-            next_state, reward, done, _ = self.env.step(self.agent.convert_act(action))
-
+                
+            next_state, reward, done, _ = self.env.step(self.agent.convert_act(action))       
+            obs = next_state
             next_state = self.agent.convert_obs(next_state)
 
             # Clip reward to [-1.0, 1.0].
             clipped_reward = max(min(reward, 1.0), -1.0)
 
-            # To calculate efficiently, set priority=max_priority here.
-            self.memory.append(state, action, clipped_reward, next_state, done)
+            if action == 0 and countdo!= 0 and episode_steps % countdo  <= 0.02:
+                # To calculate efficiently, set priority=max_priority here.
+                self.memory.append(state, action, clipped_reward, next_state, done)
+
+            elif action != 0:
+                # To calculate efficiently, set priority=max_priority here.
+                self.memory.append(state, action, clipped_reward, next_state, done)
+            else: 
+                pass
 
             self.steps += 1
             episode_steps += 1
             episode_return += reward
             state = next_state
+            
 
             if self.is_update():
                 self.learn()
@@ -252,9 +271,9 @@ class SacdAgent():
             if self.steps % self.target_update_interval == 0:
                 self.update_target()
 
-            if self.steps % self.eval_interval == 0:
-                self.evaluate()
-                self.save_models(os.path.join(self.model_dir, 'final'))
+            #if self.steps % self.eval_interval == 0:
+            #    self.evaluate()
+            #    self.save_models(os.path.join(self.model_dir, 'final'))
 
         # We log running mean of training rewards.
         self.train_return.append(episode_return)
@@ -265,7 +284,9 @@ class SacdAgent():
 
         print(f'Episode: {self.episodes}  '
               f'Episode steps: {episode_steps}  '
+              f'Nothing steps: {countdo}  '
               f'Return: {episode_return:<5.3f}')
+
 
     def learn(self):
         assert hasattr(self, 'q1_optim') and hasattr(self, 'q2_optim') and\
@@ -278,11 +299,12 @@ class SacdAgent():
         if self.use_per:
             batch, weights = self.memory.sample(self.batch_size)
         else:
+            #print("....")
             batch = self.memory.sample(self.batch_size)
             # Set priority weights to 1 when we don't use PER.
             weights = 1.
 
-        q1_loss, q2_loss, errors, mean_q1, mean_q2 = self.calc_critic_loss(batch, weights)
+        q1_loss, q2_loss, errors, mean_q1, mean_q2 = self.calc_critic_loss(batch, weights)   # Two Q-functions to mitigate positive bias in the policy improvement step
         policy_loss, entropies = self.calc_policy_loss(batch, weights)
         entropy_loss = self.calc_entropy_loss(entropies, weights)
 
@@ -359,7 +381,7 @@ class SacdAgent():
                 break
 
         mean_return = total_return / num_episodes
-        step_return = total_episode / num_steps  #
+        mean_step = total_episode / num_episodes
 
         if mean_return > self.best_eval_score:
             self.best_eval_score = mean_return
@@ -367,9 +389,10 @@ class SacdAgent():
 
         self.writer.add_scalar(
             'reward/test', mean_return, self.steps)
+
         print('-' * 60)
         print(f'Num steps: {self.steps}  '
-              f'return step: {step_return}  '  #
+              f'Mean step: {mean_step}  '
               f'return: {mean_return:<5.3f}')
         print('-' * 60)
 
