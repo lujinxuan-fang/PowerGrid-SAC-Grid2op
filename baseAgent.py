@@ -19,11 +19,11 @@ from grid2op.Reward import GameplayReward, L2RPNReward
 
 
 class SacdAgent():
-    def __init__(self, env, test_env, log_dir, num_steps=1000000, batch_size=64,
+    def __init__(self, env, test_env, log_dir, num_steps=30000000, batch_size=64,
                  lr=0.0003, memory_size=1000000, gamma=0.99, multi_step=1,
                  target_entropy_ratio=0.98, start_steps=1000,
-                 update_interval=50, target_update_interval=8000,use_per=False,num_eval_steps=125000,
-                 max_episode_steps=20000, log_interval=10, eval_interval=10000,
+                 update_interval=50, target_update_interval=1000,use_per=False,num_eval_steps=1000000,
+                 max_episode_steps=100000, log_interval=10, eval_interval=10000,
                  cuda=True, seed=0):
         super().__init__()
 
@@ -87,7 +87,7 @@ class SacdAgent():
 
         self.do_nothing = self.agent.action_space({})
         self.print_next = False
-        self.threshold_powerFlow_safe = 0.9
+        self.threshold_powerFlow_safe = 0.8
 
         # Define networks.
         self.policy = CateoricalPolicy(self.agent.obs_size, self.agent.action_size).to(self.device)
@@ -229,7 +229,7 @@ class SacdAgent():
 
         while (not done) and episode_steps <= self.max_episode_steps:
 
-            if np.all(obs.rho <= self.threshold_powerFlow_safe):  # in program this is set 0.9
+            if np.all(obs.rho <= self.threshold_powerFlow_safe): 
                 action = 0
                 #next_state, reward, done, _ = self.env.step(self.agent.convert_act(action))
                 #next_state, reward, done, _ = self.env.step(self.do_nothing)
@@ -271,9 +271,9 @@ class SacdAgent():
             if self.steps % self.target_update_interval == 0:
                 self.update_target()
 
-            #if self.steps % self.eval_interval == 0:
-            #    self.evaluate()
-            #    self.save_models(os.path.join(self.model_dir, 'final'))
+            if self.steps % self.eval_interval == 0:
+                self.evaluate()
+                self.save_models(os.path.join(self.model_dir, 'final'))
 
         # We log running mean of training rewards.
         self.train_return.append(episode_return)
@@ -282,10 +282,11 @@ class SacdAgent():
             self.writer.add_scalar(
                 'reward/train', self.train_return.get(), self.steps)
 
-        print(f'Episode: {self.episodes}  '
-              f'Episode steps: {episode_steps}  '
-              f'Nothing steps: {countdo}  '
-              f'Return: {episode_return:<5.3f}')
+        if self.episodes:
+            print(f'Episode: {self.episodes}  '
+                f'Episode steps: {episode_steps}  '
+                f'Nothing steps: {countdo}  '
+                f'Return: {episode_return:<5.3f}')
 
 
     def learn(self):
@@ -390,10 +391,15 @@ class SacdAgent():
         self.writer.add_scalar(
             'reward/test', mean_return, self.steps)
 
+        #if self.episodes:
+        #    print(f'Episode: {num_episodes}  '
+        #        f'Episode steps: {episode_steps}  '
+        #        f'Return: {episode_return:<5.3f}')
+
         print('-' * 60)
         print(f'Num steps: {self.steps}  '
               f'Mean step: {mean_step}  '
-              f'return: {mean_return:<5.3f}')
+              f'Return: {mean_return:<5.3f}')
         print('-' * 60)
 
     def save_models(self, save_dir):
